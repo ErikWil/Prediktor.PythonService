@@ -33,4 +33,10 @@ public class OpcUaSettings
     /// Whether to automatically accept untrusted server certificates. Should be false in production.
     /// </summary>
     public bool AutoAcceptUntrustedCertificates { get; set; } = true;
+
+    /// <summary>
+    /// OPC UA trigger subscriptions. Each key is a NodeId string (e.g. "ns=2;s=MyTag") and the
+    /// value is "script:function" identifying the Python function to call when the tag changes.
+    /// </summary>
+    public Dictionary<string, string> Triggers { get; set; } = new();
 }

@@ -33,6 +33,8 @@ builder.Services.AddSingleton(opcUaSettings);
 // Register services
 builder.Services.AddSingleton<PythonExecutorService>();
 builder.Services.AddSingleton<OpcUaConnectionService>();
+builder.Services.AddSingleton<OpcUaDataService>();
+builder.Services.AddSingleton<OpcUaTriggerService>();
 
 builder.Services.AddHostedService<Worker>();
 
