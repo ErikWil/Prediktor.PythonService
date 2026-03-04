@@ -59,22 +59,29 @@ public class OpcUaDataService
     }
 
     /// <summary>
-    /// Reads the time-average of an OPC UA tag over the last 24 hours in 1-hour intervals.
+    /// Reads the time-average of an OPC UA tag over the specified time range.
     /// Returns a list of [Value, QualityCode, Timestamp] arrays.
     /// </summary>
     /// <param name="tagName">NodeId string of the tag.</param>
-    public List<object?[]> GetAvg(string tagName)
+    /// <param name="start">Start time in ISO 8601 format (e.g. "2024-01-01T00:00:00Z").</param>
+    /// <param name="end">End time in ISO 8601 format.</param>
+    /// <param name="intervalMs">Processing interval in milliseconds (e.g. 3600000 for 1 hour).</param>
+    public List<object?[]> GetAvg(string tagName, string start, string end, double intervalMs)
     {
-        return GetAggregated(
-            tagName,
-            ObjectIds.AggregateFunction_TimeAverage,
-            DateTime.UtcNow.AddHours(-24),
-            DateTime.UtcNow,
-            processingIntervalMs: 3_600_000.0);
+        if (intervalMs <= 0)
+            throw new ArgumentOutOfRangeException(nameof(intervalMs), "Processing interval must be greater than zero.");
+
+        var startDt = ParseTimestamp(start, nameof(start));
+        var endDt = ParseTimestamp(end, nameof(end));
+
+        if (startDt >= endDt)
+            throw new ArgumentException("'start' must be earlier than 'end'.", nameof(start));
+
+        return GetAggregated(tagName, ObjectIds.AggregateFunction_TimeAverage, startDt, endDt, intervalMs);
     }
 
     /// <summary>
-    /// Reads an OPC UA aggregated value for a tag over the last hour.
+    /// Reads an OPC UA aggregated value for a tag over the specified time range.
     /// Returns a list of [Value, QualityCode, Timestamp] arrays.
     /// </summary>
     /// <param name="tagName">NodeId string of the tag.</param>
@@ -82,15 +89,22 @@ public class OpcUaDataService
     /// Aggregation function name, e.g. "Average", "Minimum", "Maximum",
     /// "Count", "Total", "TimeAverage", "Interpolative".
     /// </param>
-    public List<object?[]> GetAgg(string tagName, string aggregation)
+    /// <param name="start">Start time in ISO 8601 format (e.g. "2024-01-01T00:00:00Z").</param>
+    /// <param name="end">End time in ISO 8601 format.</param>
+    /// <param name="intervalMs">Processing interval in milliseconds (e.g. 3600000 for 1 hour).</param>
+    public List<object?[]> GetAgg(string tagName, string aggregation, string start, string end, double intervalMs)
     {
+        if (intervalMs <= 0)
+            throw new ArgumentOutOfRangeException(nameof(intervalMs), "Processing interval must be greater than zero.");
+
+        var startDt = ParseTimestamp(start, nameof(start));
+        var endDt = ParseTimestamp(end, nameof(end));
+
+        if (startDt >= endDt)
+            throw new ArgumentException("'start' must be earlier than 'end'.", nameof(start));
+
         var aggregateNodeId = ResolveAggregateFunction(aggregation);
-        return GetAggregated(
-            tagName,
-            aggregateNodeId,
-            DateTime.UtcNow.AddHours(-1),
-            DateTime.UtcNow,
-            processingIntervalMs: 3_600_000.0);
+        return GetAggregated(tagName, aggregateNodeId, startDt, endDt, intervalMs);
     }
 
     /// <summary>
@@ -208,5 +222,15 @@ public class OpcUaDataService
             "interpolative" => ObjectIds.AggregateFunction_Interpolative,
             _ => throw new ArgumentException($"Unknown OPC UA aggregation function: '{aggregation}'.", nameof(aggregation))
         };
+    }
+
+    private static DateTime ParseTimestamp(string value, string paramName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("Timestamp must not be null or empty. Expected an ISO 8601 string.", paramName);
+
+        if (DateTime.TryParse(value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt))
+            return dt;
+        throw new ArgumentException($"Could not parse '{value}' as an ISO 8601 timestamp.", paramName);
     }
 }

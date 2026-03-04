@@ -59,8 +59,8 @@ public class PythonExecutorService
             _mainScope.Set("opc", dataService);
             // Expose individual top-level aliases so scripts can call them without the "opc." prefix
             _mainScope.Set("GetValues", new Func<string[], List<object?[]>>(dataService.GetValues));
-            _mainScope.Set("GetAvg", new Func<string, List<object?[]>>(dataService.GetAvg));
-            _mainScope.Set("GetAgg", new Func<string, string, List<object?[]>>(dataService.GetAgg));
+            _mainScope.Set("GetAvg", new Func<string, string, string, double, List<object?[]>>(dataService.GetAvg));
+            _mainScope.Set("GetAgg", new Func<string, string, string, string, double, List<object?[]>>(dataService.GetAgg));
             _mainScope.Set("SetValue", new Action<string, object, uint, string>(dataService.SetValue));
         }
 
