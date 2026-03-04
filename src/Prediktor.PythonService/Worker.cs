@@ -7,15 +7,21 @@ public class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private readonly PythonExecutorService _pythonExecutor;
     private readonly OpcUaConnectionService _opcUaConnection;
+    private readonly OpcUaDataService _opcUaData;
+    private readonly OpcUaTriggerService _triggerService;
 
     public Worker(
         ILogger<Worker> logger,
         PythonExecutorService pythonExecutor,
-        OpcUaConnectionService opcUaConnection)
+        OpcUaConnectionService opcUaConnection,
+        OpcUaDataService opcUaData,
+        OpcUaTriggerService triggerService)
     {
         _logger = logger;
         _pythonExecutor = pythonExecutor;
         _opcUaConnection = opcUaConnection;
+        _opcUaData = opcUaData;
+        _triggerService = triggerService;
     }
 
     public override async Task StartAsync(CancellationToken cancellationToken)
@@ -32,6 +38,13 @@ public class Worker : BackgroundService
     {
         _logger.LogInformation("Prediktor Python Service running.");
 
+        // Inject OPC UA functions into the Python scope before executing scripts
+        _pythonExecutor.InjectOpcFunctions(_opcUaData);
+
+        // Subscribe to OPC UA trigger nodes
+        _triggerService.SetupTriggers();
+
+        // Execute configured startup scripts
         _pythonExecutor.ExecuteAllScripts();
 
         // Keep the service alive until cancellation is requested
@@ -49,6 +62,7 @@ public class Worker : BackgroundService
     {
         _logger.LogInformation("Prediktor Python Service stopping.");
 
+        _triggerService.Dispose();
         await _opcUaConnection.DisconnectAsync().ConfigureAwait(false);
         _pythonExecutor.Shutdown();
 

@@ -8,6 +8,7 @@ public class PythonExecutorService
     private readonly PythonSettings _settings;
     private readonly ILogger<PythonExecutorService> _logger;
     private bool _initialized;
+    private PyModule? _mainScope;
 
     public PythonExecutorService(PythonSettings settings, ILogger<PythonExecutorService> logger)
     {
@@ -32,12 +33,43 @@ public class PythonExecutorService
         PythonEngine.Initialize();
         _initialized = true;
 
+        using (Py.GIL())
+        {
+            _mainScope = Py.CreateScope("__prediktor_main__");
+        }
+
         _logger.LogInformation("Python engine initialized. Version: {Version}", PythonEngine.Version);
+    }
+
+    /// <summary>
+    /// Injects OPC UA data-access functions into the Python scope so scripts can call them directly:
+    /// <c>GetValues(...)</c>, <c>GetAvg(...)</c>, <c>GetAgg(...)</c>, <c>SetValue(...)</c>.
+    /// The underlying <see cref="OpcUaDataService"/> object is also available as <c>opc</c>.
+    /// </summary>
+    public void InjectOpcFunctions(OpcUaDataService dataService)
+    {
+        if (!_initialized || _mainScope == null)
+        {
+            _logger.LogWarning("Python engine is not initialized. Cannot inject OPC functions.");
+            return;
+        }
+
+        using (Py.GIL())
+        {
+            _mainScope.Set("opc", dataService);
+            // Expose individual top-level aliases so scripts can call them without the "opc." prefix
+            _mainScope.Set("GetValues", new Func<string[], List<object?[]>>(dataService.GetValues));
+            _mainScope.Set("GetAvg", new Func<string, List<object?[]>>(dataService.GetAvg));
+            _mainScope.Set("GetAgg", new Func<string, string, List<object?[]>>(dataService.GetAgg));
+            _mainScope.Set("SetValue", new Action<string, object, uint, string>(dataService.SetValue));
+        }
+
+        _logger.LogInformation("OPC UA functions (GetValues, GetAvg, GetAgg, SetValue) injected into Python scope.");
     }
 
     public void ExecuteScript(string scriptPath)
     {
-        if (!_initialized)
+        if (!_initialized || _mainScope == null)
         {
             _logger.LogWarning("Python engine is not initialized. Skipping script: {Script}", scriptPath);
             return;
@@ -56,7 +88,7 @@ public class PythonExecutorService
             try
             {
                 var code = File.ReadAllText(scriptPath);
-                PythonEngine.RunSimpleString(code);
+                _mainScope.Exec(code);
                 _logger.LogInformation("Python script completed: {Script}", scriptPath);
             }
             catch (PythonException ex)
@@ -80,11 +112,60 @@ public class PythonExecutorService
         }
     }
 
+    /// <summary>
+    /// Calls a Python function defined in the shared script scope when an OPC UA trigger fires.
+    /// </summary>
+    /// <param name="scriptFunction">"script:function" or "function" identifying the Python function.</param>
+    /// <param name="nodeId">NodeId string of the tag that changed.</param>
+    /// <param name="value">New tag value.</param>
+    /// <param name="quality">OPC UA StatusCode of the new value.</param>
+    /// <param name="timestamp">Source timestamp of the new value.</param>
+    public void CallTriggerFunction(string scriptFunction, string nodeId, object? value, uint quality, DateTime timestamp)
+    {
+        if (!_initialized || _mainScope == null)
+        {
+            _logger.LogWarning("Python engine is not initialized. Cannot call trigger function '{Function}'.", scriptFunction);
+            return;
+        }
+
+        // "script:function" -> use the part after the colon as the Python function name
+        var parts = scriptFunction.Split(':', 2);
+        var functionName = parts.Length > 1 ? parts[1] : parts[0];
+
+        using (Py.GIL())
+        {
+            try
+            {
+                if (!_mainScope.Contains(functionName))
+                {
+                    _logger.LogWarning("Python function '{Function}' not found in script scope.", functionName);
+                    return;
+                }
+
+                var func = _mainScope.Get<PyObject>(functionName);
+                func.Invoke(
+                    nodeId.ToPython(),
+                    value?.ToPython() ?? PyObject.None,
+                    quality.ToPython(),
+                    timestamp.ToString("O").ToPython());
+            }
+            catch (PythonException ex)
+            {
+                _logger.LogError(ex, "Python error calling trigger function '{Function}'.", functionName);
+            }
+        }
+    }
+
     public void Shutdown()
     {
         if (_initialized)
         {
             _logger.LogInformation("Shutting down Python engine.");
+            using (Py.GIL())
+            {
+                _mainScope?.Dispose();
+                _mainScope = null;
+            }
             PythonEngine.Shutdown();
             _initialized = false;
         }
