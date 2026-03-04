@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Prediktor.PythonService/Prediktor.PythonService.csproj" />
+  </Folder>
+</Solution>
